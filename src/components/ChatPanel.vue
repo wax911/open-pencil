@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport } from 'reka-ui'
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuRoot,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  ScrollAreaRoot,
+  ScrollAreaScrollbar,
+  ScrollAreaThumb,
+  ScrollAreaViewport
+} from 'reka-ui'
 import { refAutoReset, useClipboard } from '@vueuse/core'
 import { computed, markRaw, nextTick, ref, watch } from 'vue'
 
@@ -21,19 +32,20 @@ import {
 } from '@/app/ai/attachment/image/presentation'
 import type { ImageAttachmentDraft } from '@/app/ai/attachment/image/types'
 import { clearToolLogEntries, didHitStepLimit } from '@/app/ai/tools'
+import { designDocActive, designDocEnabled, designDocFileName } from '@/app/ai/design-doc/store'
 import { activeTab } from '@/app/tabs'
 import { getActiveEditorStore } from '@/app/editor/active-store'
 import ACPPermissionDialog from '@/components/chat/ACPPermissionDialog.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import ChatMessage from '@/components/chat/ChatMessage.vue'
 import AppPlaceholder from '@/components/ui/AppPlaceholder.vue'
-import AppButton from '@/components/ui/AppButton.vue'
+import AppTextButton from '@/components/ui/AppTextButton.vue'
+import Tip from '@/components/ui/Tip.vue'
+import { menuItem, useMenuUI } from '@/components/ui/menu'
 import ProviderSetup from '@/components/chat/ProviderSetup.vue'
 import { useAIChat } from '@/app/ai/chat/use'
 import { toast } from '@/app/shell/ui'
 import { useI18n } from '@open-pencil/vue'
-
-import { useNotificationMessages } from '@/app/i18n/notifications'
 
 import type { Chat } from '@ai-sdk/vue'
 import type { UIMessage } from 'ai'
@@ -41,14 +53,26 @@ import type { JSONObject } from '@open-pencil/scene-graph/primitives'
 
 const IS_DEV = import.meta.env.DEV
 
-const { isConfigured, ensureChat, resetChat, chatFailure, clearChatFailure } = useAIChat()
+const {
+  isConfigured,
+  ensureChat,
+  conversations,
+  activeConversationTitle,
+  newConversation,
+  switchConversation,
+  deleteConversation,
+  chatFailure,
+  clearChatFailure,
+  resetChat
+} = useAIChat()
 const { copy } = useClipboard()
 const { dialogs } = useI18n()
-const notifications = useNotificationMessages()
 
 const chat = ref<Chat<UIMessage> | null>(null)
 const isPreparingImages = ref(false)
 let attachmentOperationVersion = 0
+const menuCls = useMenuUI({ content: 'min-w-56' })
+const itemCls = menuItem({ justify: 'start' })
 
 void ensureChat()
   .then((c) => {
@@ -56,15 +80,17 @@ void ensureChat()
     return undefined
   })
   .catch((error: unknown) => {
-    toast.error(
-      notifications.value.chatInitializationFailed({
-        error: error instanceof Error ? error.message : String(error)
-      })
-    )
+    toast.error(error instanceof Error ? error.message : 'Failed to initialize chat')
   })
 const messagesEnd = ref<HTMLDivElement>()
 const debugCopied = refAutoReset(false, 1500)
 const acpLogCopied = refAutoReset(false, 1500)
+
+const designDocLabel = computed(() =>
+  designDocActive.value
+    ? designDocFileName.value || dialogs.value.designDoc
+    : dialogs.value.designDoc
+)
 
 const messages = computed(() => chat.value?.messages ?? [])
 const failureMessage = computed(() => {
@@ -80,13 +106,6 @@ const failureMessage = computed(() => {
   }
 })
 const status = computed(() => chat.value?.status ?? 'ready')
-function isStreamingMessage(message: UIMessage, index: number): boolean {
-  return (
-    message.role === 'assistant' &&
-    index === messages.value.length - 1 &&
-    (status.value === 'submitted' || status.value === 'streaming')
-  )
-}
 const isThinking = computed(() => {
   const s = status.value
   if (s !== 'submitted' && s !== 'streaming') return false
@@ -119,8 +138,7 @@ watch(messages, scrollToBottom, { deep: true })
 watch(
   () => chatFailure.value?.reason,
   (reason) => {
-    if (!reason) return
-    toast.error(failureMessage.value ?? dialogs.value.chatRequestFailed)
+    if (reason) toast.error(failureMessage.value ?? dialogs.value.chatRequestFailed)
   }
 )
 watch(
@@ -134,30 +152,51 @@ watch(
   }
 )
 
+async function rebuildChat() {
+  const nextChat = await ensureChat()
+  chat.value = nextChat ? markRaw(nextChat) : null
+}
+
+function handleNewConversation() {
+  newConversation()
+  clearToolLogEntries()
+  clearACPDebugLog()
+  void rebuildChat()
+}
+
+function handleSwitchConversation(conversationId: string) {
+  switchConversation(conversationId)
+  void rebuildChat()
+}
+
+function handleDeleteConversation(conversationId: string) {
+  deleteConversation(conversationId)
+  clearToolLogEntries()
+  clearACPDebugLog()
+  void rebuildChat()
+}
+
+function handleToggleDesignDoc() {
+  designDocEnabled.value = !designDocEnabled.value
+}
+
 async function handleSubmit(text: string, images: ImageAttachmentDraft[] = []) {
   if (status.value === 'streaming' || status.value === 'submitted' || isPreparingImages.value) {
     for (const image of images) revokeImagePreviewURL(image.previewURL)
     if (images.length > 0) toast.error(dialogs.value.chatRequestFailed)
     return
   }
-
   const operationVersion = ++attachmentOperationVersion
   if (images.length > 0) isPreparingImages.value = true
   clearChatFailure()
   try {
     const currentChat = chat.value ?? (await ensureChat())
     if (currentChat) chat.value = markRaw(currentChat)
-    if (!currentChat || operationVersion !== attachmentOperationVersion) {
-      for (const image of images) revokeImagePreviewURL(image.previewURL)
-      if (images.length > 0) toast.error(dialogs.value.chatRequestFailed)
-      return
-    }
-
+    if (!currentChat || operationVersion !== attachmentOperationVersion) return
     if (images.length === 0) {
       await currentChat.sendMessage({ text })
       return
     }
-
     const messageId = crypto.randomUUID()
     currentChat.messages = [
       ...currentChat.messages,
@@ -178,31 +217,25 @@ async function handleSubmit(text: string, images: ImageAttachmentDraft[] = []) {
         displayText: text
       }))
     )
-
     const preparedImages = await Promise.all(
       images.map((image) => prepareImageAttachment(image.file))
     )
     const findings = await analyzeAttachedImages(getActiveEditorStore(), text, preparedImages)
     if (operationVersion !== attachmentOperationVersion || chat.value !== currentChat) return
-
     setImageAttachmentPresentations(
       messageId,
-      preparedImages.map((prepared, index) => {
-        const image = images[index]
-        const previewURL = createImagePreviewURL(prepared.blob)
-        return {
-          id: crypto.randomUUID(),
-          messageId,
-          name: image?.file.name ?? `Image ${index + 1}`,
-          mediaType: prepared.mediaType,
-          originalWidth: prepared.originalWidth,
-          originalHeight: prepared.originalHeight,
-          previewWidth: prepared.width,
-          previewHeight: prepared.height,
-          previewURL,
-          displayText: text
-        }
-      })
+      preparedImages.map((prepared, index) => ({
+        id: crypto.randomUUID(),
+        messageId,
+        name: images[index]?.file.name ?? `Image ${index + 1}`,
+        mediaType: prepared.mediaType,
+        originalWidth: prepared.originalWidth,
+        originalHeight: prepared.originalHeight,
+        previewWidth: prepared.width,
+        previewHeight: prepared.height,
+        previewURL: createImagePreviewURL(prepared.blob),
+        displayText: text
+      }))
     )
     await currentChat.sendMessage({
       messageId,
@@ -214,7 +247,7 @@ async function handleSubmit(text: string, images: ImageAttachmentDraft[] = []) {
     })
   } catch (e) {
     console.error('Chat error:', e)
-    toast.error(dialogs.value.chatRequestFailed)
+    toast.error(e instanceof Error ? e.message : String(e))
   } finally {
     if (operationVersion === attachmentOperationVersion) isPreparingImages.value = false
   }
@@ -229,22 +262,20 @@ async function handleCopyDebug() {
   debugCopied.value = true
 }
 
-async function handleCopyACPLog() {
+async function handleCopyAcpLog() {
   const text = getACPDebugText()
   if (!text) return
   await copy(text)
   acpLogCopied.value = true
 }
 
-function handleClearChat() {
+function handleClearChat(): void {
   attachmentOperationVersion += 1
   isPreparingImages.value = false
   clearChatFailure()
   clearImageAttachmentPresentations()
   chat.value = null
-  void resetChat().catch((error: unknown) => {
-    console.error('Chat reset error:', error)
-  })
+  void resetChat().catch((error: unknown) => console.error('Chat reset error:', error))
   clearToolLogEntries()
   clearACPDebugLog()
 }
@@ -255,6 +286,75 @@ function handleClearChat() {
     <ProviderSetup v-if="!isConfigured" />
 
     <template v-else>
+      <!-- Conversation header -->
+      <div
+        class="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5"
+        data-test-id="chat-conversation-header"
+      >
+        <DropdownMenuRoot>
+          <DropdownMenuTrigger as-child>
+            <button
+              data-test-id="chat-conversation-trigger"
+              class="flex min-w-0 max-w-[220px] items-center gap-1.5 rounded px-1.5 py-0.5 text-left text-[11px] font-medium text-surface hover:bg-hover"
+            >
+              <icon-lucide-messages-square class="size-3 shrink-0 text-muted" />
+              <span class="truncate">{{ activeConversationTitle }}</span>
+              <icon-lucide-chevron-down class="size-3 shrink-0 text-muted" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuPortal>
+            <DropdownMenuContent side="bottom" :side-offset="4" :class="menuCls.content">
+              <DropdownMenuItem
+                :class="itemCls"
+                data-test-id="chat-new-conversation"
+                @select="handleNewConversation"
+              >
+                <icon-lucide-plus class="size-3 text-muted" />
+                <span class="flex-1">{{ dialogs.newConversation }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator :class="menuCls.separator" />
+              <div v-if="conversations.length" class="max-h-56 overflow-y-auto">
+                <DropdownMenuItem
+                  v-for="conversation in conversations"
+                  :key="conversation.id"
+                  :class="itemCls"
+                  data-test-id="chat-conversation-item"
+                  @select="handleSwitchConversation(conversation.id)"
+                >
+                  <span class="min-w-0 flex-1 truncate">{{ conversation.title }}</span>
+                  <button
+                    type="button"
+                    class="rounded p-0.5 text-muted hover:bg-hover hover:text-surface"
+                    :aria-label="dialogs.deleteConversation"
+                    @click.stop="handleDeleteConversation(conversation.id)"
+                  >
+                    <icon-lucide-trash-2 class="size-3" />
+                  </button>
+                </DropdownMenuItem>
+              </div>
+              <div v-else class="px-2 py-1.5 text-[10px] text-muted">
+                {{ dialogs.noConversations }}
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenuPortal>
+        </DropdownMenuRoot>
+
+        <div class="ml-auto flex items-center gap-1">
+          <Tip :label="designDocLabel">
+            <button
+              type="button"
+              data-test-id="chat-design-doc-toggle"
+              :aria-label="dialogs.designDoc"
+              class="rounded p-1 text-muted hover:bg-hover hover:text-surface"
+              :class="designDocActive ? 'text-accent' : ''"
+              @click="handleToggleDesignDoc"
+            >
+              <icon-lucide-file-text class="size-3.5" />
+            </button>
+          </Tip>
+        </div>
+      </div>
+
       <ScrollAreaRoot class="min-h-0 flex-1">
         <ScrollAreaViewport class="h-full px-3 py-3 [&>div]:h-full">
           <AppPlaceholder
@@ -270,12 +370,7 @@ function handleClearChat() {
 
           <!-- Messages -->
           <div v-else data-test-id="chat-messages" class="flex flex-col gap-3">
-            <ChatMessage
-              v-for="(msg, index) in messages"
-              :key="msg.id"
-              :message="msg"
-              :streaming="isStreamingMessage(msg, index)"
-            />
+            <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
 
             <!-- Thinking indicator: shown when AI is working but no visible activity -->
             <div v-if="isThinking" data-test-id="chat-typing-indicator" class="flex gap-2">
@@ -324,26 +419,39 @@ function handleClearChat() {
         v-if="messages.length > 0"
         class="flex shrink-0 items-center gap-1 border-t border-border px-3 py-1"
       >
-        <AppButton v-if="IS_DEV" color="neutral" variant="ghost" size="xs" @click="handleCopyDebug">
+        <AppTextButton
+          v-if="IS_DEV"
+          :ui="{ base: 'flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover' }"
+          @click="handleCopyDebug"
+        >
           <icon-lucide-clipboard-copy v-if="!debugCopied" class="size-3" />
           <icon-lucide-check v-else class="size-3 text-green-400" />
           {{ debugCopied ? 'Copied' : 'Copy log' }}
-        </AppButton>
-        <AppButton
+        </AppTextButton>
+        <AppTextButton
           v-if="IS_DEV && hasACPDebugEntries()"
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          @click="handleCopyACPLog"
+          :ui="{ base: 'flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover' }"
+          @click="handleCopyAcpLog"
         >
           <icon-lucide-bug v-if="!acpLogCopied" class="size-3" />
           <icon-lucide-check v-else class="size-3 text-green-400" />
           {{ acpLogCopied ? 'Copied' : 'ACP log' }}
-        </AppButton>
-        <AppButton color="error" variant="ghost" size="xs" @click="handleClearChat">
+        </AppTextButton>
+        <AppTextButton
+          :ui="{ base: 'flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover' }"
+          @click="handleNewConversation"
+        >
+          <icon-lucide-plus class="size-3" />
+          {{ dialogs.newConversation }}
+        </AppTextButton>
+        <AppTextButton
+          color="error"
+          :ui="{ base: 'flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover' }"
+          @click="handleClearChat"
+        >
           <icon-lucide-trash-2 class="size-3" />
           Clear
-        </AppButton>
+        </AppTextButton>
       </div>
 
       <ChatInput

@@ -29,7 +29,7 @@ export type AIModelProfile = {
   modelID: string
   customModelID: string
   maxOutputTokens: number
-  reasoningEffort?: string
+  reasoningEffort: string
   harnessThinkingLevel?: HarnessThinkingLevel
   harnessPermissionMode?: HarnessPermissionMode
   capabilities: AIModelCapability[]

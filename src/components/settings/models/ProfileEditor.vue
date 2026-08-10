@@ -7,6 +7,7 @@ import { ACP_AGENTS, AI_PROVIDERS, type AIProviderID } from '@open-pencil/core/c
 
 import { refreshAIProviderStatus } from '@/app/ai/chat/storage'
 import { resolveModelsDevModel } from '@/app/ai/models/catalog'
+import { defaultReasoningLevel, reasoningSelectorOptions } from '@/app/ai/reasoning'
 import {
   testProviderConnection,
   type ProviderConnectionTestFailureReason
@@ -90,6 +91,22 @@ const knownCapabilities = computed<AIModelCapability[]>(() => [
 const outputTokenRecommendation = computed(
   () => knownModel.value?.recommendedMaxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
 )
+const reasoningSelector = computed(() =>
+  reasoningSelectorOptions(catalogModel.value?.reasoningOptions)
+)
+const canConfigureReasoning = computed(() => !isACP.value && reasoningSelector.value.length > 0)
+const reasoningEffortModel = computed({
+  get: () => {
+    const values = reasoningSelector.value.map((option) => option.value)
+    if (!draft.reasoningEffort || !values.includes(draft.reasoningEffort)) {
+      return defaultReasoningLevel(catalogModel.value?.reasoningOptions)
+    }
+    return draft.reasoningEffort
+  },
+  set: (value: string) => {
+    draft.reasoningEffort = value
+  }
+})
 const modelDisplayName = computed(() => {
   const modelId = draft.customModelID.trim() || draft.modelID
   return providerDef.value.models.find((model) => model.id === modelId)?.name || modelId
@@ -480,6 +497,20 @@ void refreshKeyStatus()
                 {{ outputTokenRecommendation.toLocaleString() }}
                 {{ dialogs.tokens }}
               </p>
+            </div>
+
+            <div v-if="canConfigureReasoning" class="border-t border-border pt-2.5">
+              <p class="text-[11px] font-medium text-surface">{{ dialogs.reasoningEffort }}</p>
+              <p class="mt-0.5 text-[10px] text-muted">
+                {{ dialogs.reasoningEffortDescription }}
+              </p>
+              <AppSelect
+                v-model="reasoningEffortModel"
+                :label="dialogs.reasoningEffort"
+                data-test-id="settings-model-reasoning"
+                class="mt-1.5"
+                :options="reasoningSelector"
+              />
             </div>
           </div>
         </CollapsibleContent>

@@ -164,6 +164,8 @@ All commands support `--json` for machine-readable output.
 
 Press <kbd>⌘</kbd><kbd>J</kbd> to open the AI assistant. It has 100+ tools that can create shapes, set fills and strokes, manage auto-layout, work with components and variables, run boolean operations, analyze design tokens, and export assets. Bring your own API key for OpenRouter, Anthropic, OpenAI, Google AI, Z.ai, MiniMax, or compatible endpoints. No backend, no account.
 
+Chats are saved per document, so you can pick up where you left off or start, switch, and delete past conversations from the chat header. Reasoning-capable models expose a thinking-effort selector in the chat toolbar and per-model defaults in AI settings. Attach a `DESIGN.md` design brief from Settings (or toggle it from the chat header) to keep the AI aligned with your direction and style.
+
 Not every provider works in the browser, and not every model streams tool calls correctly. See [BYOK provider & model compatibility](packages/docs/programmable/byok-provider-compatibility.md) for measured results — contributions welcome.
 
 ### Coding agents (desktop)

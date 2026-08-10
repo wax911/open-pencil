@@ -1,4 +1,4 @@
-import type { AIProviderID, ModelOption } from '@open-pencil/core/constants'
+import type { AIProviderID, ModelOption, ModelReasoningOption } from '@open-pencil/core/constants'
 
 import { readCacheJSON, writeCacheJSON } from '@/app/cache'
 
@@ -21,6 +21,8 @@ type ModelsDevModel = {
   name?: unknown
   attachment?: unknown
   tool_call?: unknown
+  reasoning?: unknown
+  reasoning_options?: unknown
   limit?: { output?: unknown }
 }
 
@@ -32,15 +34,43 @@ type ModelsDevCatalog = Record<string, ModelsDevProvider>
 
 let catalogPromise: Promise<ModelsDevCatalog | null> | null = null
 
+type ModelsDevReasoningOption = {
+  type?: unknown
+  values?: unknown
+  min?: unknown
+}
+
+function isReasoningOption(value: unknown): value is ModelReasoningOption {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as ModelsDevReasoningOption
+  if (record.type === 'toggle') return true
+  if (record.type === 'effort') {
+    return Array.isArray(record.values) && record.values.every((entry) => typeof entry === 'string')
+  }
+  if (record.type === 'budget_tokens') {
+    return record.min === undefined || typeof record.min === 'number'
+  }
+  return false
+}
+
+function normalizeReasoningOptions(value: unknown): ModelReasoningOption[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const options = value.filter(isReasoningOption)
+  return options.length > 0 ? options : undefined
+}
+
 function normalizeModel(id: string, model: ModelsDevModel): ModelOption {
   const capabilities: ('tools' | 'vision')[] = []
   if (model.tool_call === true) capabilities.push('tools')
   if (model.attachment === true) capabilities.push('vision')
   const output = model.limit?.output
+  const reasoningOptions = normalizeReasoningOptions(model.reasoning_options)
   return {
     id,
     name: typeof model.name === 'string' && model.name ? model.name : id,
     capabilities,
+    ...(model.reasoning === true ? { reasoning: true } : {}),
+    ...(reasoningOptions ? { reasoningOptions } : {}),
     ...(typeof output === 'number' && Number.isFinite(output)
       ? { recommendedMaxOutputTokens: Math.min(128_000, Math.max(1024, output)) }
       : {})

@@ -17,6 +17,8 @@
 - Show Figma-style temporary distance measurements between selected and Option/Alt-hovered layers. (#491)
 - Add a single CodeMirror editor for live Design JSX and HTML/CSS canvas previews, with Tailwind JSX viewing, completion, diagnostics, line numbers, bounded execution, and session-level undo. (#130)
 - Allow supported AI model profiles to set a provider-specific reasoning effort. (#454)
+- Persist AI chat conversations per document and switch between past conversations.
+- Load an optional DESIGN.md brief into AI chat context so design direction persists across turns.
 - Show unavailable or substituted document fonts with affected-layer selection and retry actions, and expose font fidelity through the Figma API and MCP tooling. (#503)
 - Add reusable remote MCP connections for ACP agents, with Streamable HTTP endpoints and bearer tokens stored in the configured credential backend.
 - Author multidimensional component variants in the Design panel, including property/value renaming, sparse-combination diagnostics, variant duplication, and exact instance transitions. (#239)

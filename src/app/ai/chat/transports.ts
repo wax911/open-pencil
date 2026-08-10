@@ -1,17 +1,43 @@
 import { Chat } from '@ai-sdk/vue'
 import { DirectChatTransport, stepCountIs, ToolLoopAgent } from 'ai'
 import type { ChatTransport, FinishReason, LanguageModel, UIMessage } from 'ai'
+import { computed, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
-import { ref } from 'vue'
 
-import { ACP_AGENTS } from '@open-pencil/core/constants'
-import type { ACPAgentID, AIProviderID } from '@open-pencil/core/constants'
+import {
+  ACP_AGENTS,
+  type ACPAgentID,
+  type AIProviderID,
+  type ModelReasoningOption
+} from '@open-pencil/core/constants'
 
-import { classifyAIChatError, type AIChatFailure } from '@/app/ai/chat/failure'
+import {
+  activeConversationId,
+  conversationById,
+  conversationsForDocument,
+  createConversation,
+  deleteConversation as deleteStoredConversation,
+  documentKeyForStore,
+  loadChatHistory,
+  persistChatHistory,
+  saveConversationSnapshot,
+  switchActiveConversation,
+  type StoredConversation
+} from '@/app/ai/chat/history'
+import {
+  classifyAIChatError,
+  classifyAIChatFinish,
+  type AIChatFailure
+} from '@/app/ai/chat/failure'
 import { resolveLanguageModelID } from '@/app/ai/chat/model'
-import { buildReasoningProviderOptions, type AIProviderOptions } from '@/app/ai/chat/reasoning'
-import SYSTEM_PROMPT from '@/app/ai/chat/system-prompt.md?raw'
+import { buildSystemPrompt } from '@/app/ai/chat/system-prompt'
 import { createAIModelRuntime, resolveModelConnectionAPIKey } from '@/app/ai/models'
+import { resolveModelsDevModel } from '@/app/ai/models/catalog'
+import {
+  mergeProviderOptions,
+  reasoningProviderOptions,
+  reasoningSelectorOptions
+} from '@/app/ai/reasoning'
 import { MAX_AGENT_STEPS, createAITools, recordStep, resetRunSteps } from '@/app/ai/tools'
 import {
   recordChatCompleted,
@@ -37,7 +63,9 @@ type ToolLoopTransportOptions = {
   model: LanguageModel
   effectiveModelID: string
   maxOutputTokens: number
+  reasoningOptions?: readonly ModelReasoningOption[]
   reasoningEffort: string
+  systemPrompt: string
 }
 
 const ANTHROPIC_CACHE_CONTROL = {
@@ -50,14 +78,6 @@ function supportsAnthropicCaching(providerID: AIProviderID, modelID: string): bo
     providerID === 'anthropic-compatible' ||
     (providerID === 'openrouter' && modelID.startsWith('anthropic/'))
   )
-}
-
-function mergeProviderOptions(
-  cacheOptions: typeof ANTHROPIC_CACHE_CONTROL | undefined,
-  reasoningOptions: AIProviderOptions | undefined
-): AIProviderOptions | undefined {
-  if (!cacheOptions && !reasoningOptions) return undefined
-  return { ...cacheOptions, ...reasoningOptions }
 }
 
 export async function createACPTransport(providerID: AIProviderID) {
@@ -76,20 +96,20 @@ export function createToolLoopTransport({
   model,
   effectiveModelID,
   maxOutputTokens,
-  reasoningEffort
+  reasoningOptions,
+  reasoningEffort,
+  systemPrompt
 }: ToolLoopTransportOptions) {
   const tools = createAITools(store)
   const cacheProviderOptions = supportsAnthropicCaching(providerID, effectiveModelID)
     ? ANTHROPIC_CACHE_CONTROL
     : undefined
-  const providerOptions = mergeProviderOptions(
-    cacheProviderOptions,
-    buildReasoningProviderOptions(providerID, reasoningEffort)
-  )
+  const reasoning = reasoningProviderOptions(providerID, reasoningOptions, reasoningEffort)
+  const providerOptions = mergeProviderOptions(cacheProviderOptions, reasoning)
 
   const agent = new ToolLoopAgent({
     model,
-    instructions: SYSTEM_PROMPT,
+    instructions: systemPrompt,
     tools,
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     maxOutputTokens,
@@ -129,37 +149,17 @@ export function createChatSessionManager({
   const failure = ref<AIChatFailure | null>(null)
   let transportDirty = false
   let currentChatStore: EditorStore | null = null
-  let currentChatMessages = new WeakMap<EditorStore, UIMessage[]>()
   let chat: Chat<UIMessage> | null = null
   let acpTransportInstance: { destroy(): Promise<void> } | null = null
   let harnessTransportInstance: { destroy(): Promise<void> } | null = null
   let overrideTransport: (() => ChatTransport<UIMessage>) | null = null
+  let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let persistenceSetup = false
 
-  function handleChatFinish({
-    finishReason,
-    isAbort,
-    isDisconnect,
-    isError
-  }: {
-    finishReason?: FinishReason
-    isAbort: boolean
-    isDisconnect: boolean
-    isError: boolean
-  }): void {
-    if (!isAbort && !isDisconnect && !isError) {
-      recordChatCompleted({ finishReason: finishReason ?? null })
-    }
-  }
-
-  function clearFailure(): void {
-    failure.value = null
-  }
-
-  function markTransportDirty() {
-    transportDirty = true
-    currentChatStore = null
-    currentChatMessages = new WeakMap()
-  }
+  const chatHistory = loadChatHistory()
+  const currentConversationId = ref<string | null>(null)
+  const conversations = ref<StoredConversation[]>([])
+  const reasoningOverride = ref<string | null>(null)
 
   async function destroyAgentTransports(): Promise<void> {
     const acp = acpTransportInstance
@@ -173,6 +173,62 @@ export function createChatSessionManager({
     if (errors.length) throw new AggregateError(errors, 'Agent transport teardown failed')
   }
 
+  function handleChatFinish({
+    finishReason,
+    isAbort,
+    isDisconnect,
+    isError
+  }: {
+    finishReason?: FinishReason
+    isAbort: boolean
+    isDisconnect: boolean
+    isError: boolean
+  }): void {
+    if (isAbort || isDisconnect || isError) return
+    const classified = classifyAIChatFinish(finishReason)
+    if (classified) failure.value = classified
+    recordChatCompleted({ finishReason: finishReason ?? null })
+  }
+
+  function clearFailure(): void {
+    failure.value = null
+  }
+
+  const activeConversationTitle = computed(() => {
+    const id = currentConversationId.value
+    return id
+      ? (conversationById(chatHistory, id)?.title ?? 'New conversation')
+      : 'New conversation'
+  })
+
+  function markTransportDirty() {
+    transportDirty = true
+    currentChatStore = null
+  }
+
+  function currentDocumentKey(): string {
+    return documentKeyForStore(getActiveEditorStore())
+  }
+
+  function refreshConversations(): void {
+    conversations.value = conversationsForDocument(chatHistory, currentDocumentKey())
+  }
+
+  function restoreActiveConversation(documentKey: string): StoredConversation {
+    const existingId = activeConversationId(chatHistory, documentKey)
+    if (existingId) {
+      const existing = conversationById(chatHistory, existingId)
+      if (existing) return existing
+    }
+    return createConversation(chatHistory, documentKey)
+  }
+
+  function persistCurrentConversation(): void {
+    const id = currentConversationId.value
+    if (!id || !chat) return
+    saveConversationSnapshot(chatHistory, id, chat.messages)
+  }
+
   async function createActiveACPTransport() {
     await destroyAgentTransports()
     const transport = await createACPTransport(providerID.value)
@@ -184,9 +240,11 @@ export function createChatSessionManager({
     await destroyAgentTransports()
     const runtime = await createAIModelRuntime('design')
     if (runtime?.kind !== 'harness') throw new Error('The Design agent is not configured for Pi')
-    const [{ HarnessChatTransport }, { buildPiMCPServers }, { getActiveTabId }] = await Promise.all(
-      [import('@/app/ai/harness/transport'), import('@/app/integrations/mcp'), import('@/app/tabs')]
-    )
+    const [{ HarnessChatTransport }, { buildPiMCPServers }, { getActiveTabId }] = await Promise.all([
+      import('@/app/ai/harness/transport'),
+      import('@/app/integrations/mcp'),
+      import('@/app/tabs')
+    ])
     const apiKey = await resolveModelConnectionAPIKey(runtime.role.connection.id)
     if (!apiKey) throw new Error('Credential is unavailable for the Pi agent')
     const model = runtime.role.profile.customModelID || runtime.role.profile.modelID
@@ -200,7 +258,7 @@ export function createChatSessionManager({
           thinkingLevel: runtime.role.profile.harnessThinkingLevel ?? 'medium',
           permissionMode: runtime.role.profile.harnessPermissionMode ?? 'allow-edits'
         },
-        instructions: SYSTEM_PROMPT,
+        instructions: buildSystemPrompt(),
         mcpServers: await buildPiMCPServers()
       },
       { OPENPENCIL_HARNESS_API_KEY: apiKey }
@@ -212,24 +270,54 @@ export function createChatSessionManager({
   async function createTransport(store: EditorStore) {
     if (overrideTransport) return overrideTransport()
 
-    await destroyAgentTransports()
+    void acpTransportInstance?.destroy()
+    acpTransportInstance = null
 
     const runtime = await createAIModelRuntime('design')
     if (runtime?.kind !== 'direct') {
       throw new Error('The Design model is not configured for direct API access')
     }
+    const connection = runtime.role.connection
+    const profile = runtime.role.profile
+    const effectiveModelID = resolveLanguageModelID({
+      providerID: connection.providerID,
+      modelID: profile.modelID,
+      customModelID: profile.customModelID
+    })
+    const catalogModel = await resolveModelsDevModel(connection.providerID, effectiveModelID)
+    const override = reasoningOverride.value
+    const supportedLevels = reasoningSelectorOptions(catalogModel?.reasoningOptions)
+    const effectiveEffort =
+      override && supportedLevels.some((option) => option.value === override)
+        ? override
+        : profile.reasoningEffort
     return createToolLoopTransport({
       store,
-      providerID: runtime.role.connection.providerID,
+      providerID: connection.providerID,
       model: runtime.model,
-      effectiveModelID: resolveLanguageModelID({
-        providerID: runtime.role.connection.providerID,
-        modelID: runtime.role.profile.modelID,
-        customModelID: runtime.role.profile.customModelID
-      }),
-      maxOutputTokens: runtime.role.profile.maxOutputTokens,
-      reasoningEffort: runtime.role.profile.reasoningEffort ?? ''
+      effectiveModelID,
+      maxOutputTokens: profile.maxOutputTokens,
+      reasoningOptions: catalogModel?.reasoningOptions,
+      reasoningEffort: effectiveEffort,
+      systemPrompt: buildSystemPrompt()
     })
+  }
+
+  function setupPersistence(): void {
+    if (persistenceSetup) return
+    persistenceSetup = true
+    watch(
+      () => chat?.messages,
+      () => {
+        if (persistTimer) clearTimeout(persistTimer)
+        persistTimer = setTimeout(() => {
+          persistCurrentConversation()
+          persistChatHistory(chatHistory)
+          refreshConversations()
+        }, 400)
+      },
+      { deep: true }
+    )
   }
 
   async function ensureChat(): Promise<Chat<UIMessage> | null> {
@@ -237,19 +325,27 @@ export function createChatSessionManager({
     if (!isConfigured.value) return null
 
     const store = getActiveEditorStore()
-    if (currentChatStore && chat) {
-      currentChatMessages.set(currentChatStore, chat.messages)
+    const documentKey = currentDocumentKey()
+
+    // Persist the outgoing conversation before any rebuild or tab switch so the
+    // debounced watcher cannot lose the tail end of the last exchange.
+    if (chat && currentConversationId.value) {
+      persistCurrentConversation()
+      persistChatHistory(chatHistory)
     }
 
     if (!chat || transportDirty || currentChatStore !== store) {
-      const messages = currentChatMessages.get(store)
+      if (currentChatStore !== store || !currentConversationId.value) {
+        currentConversationId.value = restoreActiveConversation(documentKey).id
+      }
       let transport: ChatTransport<UIMessage>
       if (isACPProvider.value) transport = await createActiveACPTransport()
       else if (isHarnessProvider.value) transport = await createActiveHarnessTransport()
       else transport = await createTransport(store)
+      const conversation = conversationById(chatHistory, currentConversationId.value)
       chat = new Chat<UIMessage>({
         transport,
-        messages,
+        messages: conversation?.messages ?? [],
         onError: (error) => {
           failure.value = classifyAIChatError(error)
           recordChatFailed({ errorName: error instanceof Error ? error.name : 'unknown' })
@@ -258,17 +354,64 @@ export function createChatSessionManager({
       })
       currentChatStore = store
       transportDirty = false
+      setupPersistence()
     }
+    refreshConversations()
     return chat
   }
 
   async function resetChat() {
-    if (currentChatStore) currentChatMessages.delete(currentChatStore)
     await destroyAgentTransports()
     failure.value = null
     chat = null
     currentChatStore = null
+    currentConversationId.value = null
     transportDirty = false
+  }
+
+  function newConversation() {
+    persistCurrentConversation()
+    void chat?.stop()
+    const conversation = createConversation(chatHistory, currentDocumentKey())
+    currentConversationId.value = conversation.id
+    persistChatHistory(chatHistory)
+    chat = null
+    currentChatStore = null
+    transportDirty = true
+    refreshConversations()
+  }
+
+  function switchConversation(conversationId: string) {
+    if (conversationId === currentConversationId.value) return
+    persistCurrentConversation()
+    void chat?.stop()
+    const documentKey = currentDocumentKey()
+    switchActiveConversation(chatHistory, documentKey, conversationId)
+    currentConversationId.value = conversationId
+    persistChatHistory(chatHistory)
+    chat = null
+    currentChatStore = null
+    transportDirty = true
+    refreshConversations()
+  }
+
+  function deleteConversation(conversationId: string) {
+    deleteStoredConversation(chatHistory, conversationId)
+    if (conversationId === currentConversationId.value) {
+      void chat?.stop()
+      chat = null
+      currentChatStore = null
+      currentConversationId.value = null
+      transportDirty = true
+    }
+    persistChatHistory(chatHistory)
+    refreshConversations()
+  }
+
+  function setReasoningOverride(level: string | null) {
+    if (reasoningOverride.value === level) return
+    reasoningOverride.value = level
+    if (chat) markTransportDirty()
   }
 
   function setOverrideTransport(factory: (() => ChatTransport<UIMessage>) | null) {
@@ -276,5 +419,19 @@ export function createChatSessionManager({
     markTransportDirty()
   }
 
-  return { ensureChat, resetChat, markTransportDirty, setOverrideTransport, failure, clearFailure }
+  return {
+    ensureChat,
+    resetChat,
+    newConversation,
+    switchConversation,
+    deleteConversation,
+    conversations,
+    activeConversationTitle,
+    reasoningOverride,
+    setReasoningOverride,
+    markTransportDirty,
+    setOverrideTransport,
+    failure,
+    clearFailure
+  }
 }

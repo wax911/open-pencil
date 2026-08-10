@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 import { IS_BROWSER } from '@open-pencil/core/constants'
 
@@ -26,6 +26,7 @@ import {
   unsplashKeyStatus
 } from '@/app/ai/chat/storage'
 import { createChatSessionManager } from '@/app/ai/chat/transports'
+import { designDocContent, designDocEnabled } from '@/app/ai/design-doc/store'
 import { exposeChatTransportOverride } from '@/app/browser-bridge'
 import { getActiveEditorStore } from '@/app/editor/active-store'
 
@@ -41,6 +42,10 @@ const chatSession = createChatSessionManager({
 })
 
 registerAIChatEffects(chatSession.markTransportDirty)
+
+// Rebuild the transport when the DESIGN.md context changes so the next turn
+// carries the updated system prompt.
+watch([designDocEnabled, designDocContent], () => chatSession.markTransportDirty())
 
 if (IS_BROWSER) {
   exposeChatTransportOverride((factory) => {
@@ -71,6 +76,13 @@ export function useAIChat() {
     ensureChat: chatSession.ensureChat,
     resetChat: chatSession.resetChat,
     chatFailure: chatSession.failure,
-    clearChatFailure: chatSession.clearFailure
+    conversations: chatSession.conversations,
+    newConversation: chatSession.newConversation,
+    switchConversation: chatSession.switchConversation,
+    deleteConversation: chatSession.deleteConversation,
+    clearChatFailure: chatSession.clearFailure,
+    activeConversationTitle: chatSession.activeConversationTitle,
+    reasoningOverride: chatSession.reasoningOverride,
+    setReasoningOverride: chatSession.setReasoningOverride
   }
 }

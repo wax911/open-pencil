@@ -6,6 +6,7 @@ import { ACP_AGENTS, AI_PROVIDERS } from '@open-pencil/core/constants'
 
 import { aiModelSettings, modelConnection, modelConnectionCredentialStatus } from '@/app/ai/models'
 import type { CredentialStatus } from '@/app/settings/credentials/types'
+import DesignDocSettingsSection from '@/components/settings/DesignDocSettingsSection.vue'
 import ProfileEditor from '@/components/settings/models/ProfileEditor.vue'
 import RoleAssignments from '@/components/settings/models/RoleAssignments.vue'
 
@@ -164,6 +165,10 @@ watch(
         <p class="text-[10px] text-muted">{{ dialogs.modelAssignmentsDescription }}</p>
       </div>
       <RoleAssignments />
+    </section>
+
+    <section class="mt-5 border-t border-border pt-4">
+      <DesignDocSettingsSection />
     </section>
   </div>
 </template>

@@ -10,7 +10,7 @@ import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
 
 import type { ACPAgentDef } from '@open-pencil/core/constants'
 
-import SYSTEM_PROMPT from '@/app/ai/chat/system-prompt.md?raw'
+import { buildSystemPrompt } from '@/app/ai/chat/system-prompt'
 import { describeDiagnosticError, recordACPTransportFailure } from '@/app/diagnostics'
 import { buildACPMCPServers } from '@/app/integrations/mcp'
 
@@ -142,9 +142,10 @@ export class ACPChatTransport implements ChatTransport<UIMessage> {
 
     if (!this.session) {
       this.session = await this.spawnAgent()
+      this.sentContext = false
     }
 
-    const promptText = this.sentContext ? text : `${SYSTEM_PROMPT}\n\n${text}`
+    const promptText = this.sentContext ? text : `${buildSystemPrompt()}\n\n${text}`
     this.sentContext = true
 
     const { connection, sessionId } = this.session
@@ -196,6 +197,10 @@ export class ACPChatTransport implements ChatTransport<UIMessage> {
             sessionId,
             prompt: [{ type: 'text', text: promptText }]
           })
+          .then((result) => {
+            finish(result.stopReason === 'end_turn' ? 'stop' : 'other')
+            return undefined
+          })
           .catch((e) => {
             recordACPTransportFailure({
               operation: 'message',
@@ -234,9 +239,9 @@ export class ACPChatTransport implements ChatTransport<UIMessage> {
         }
       })
     } catch (e) {
-      recordACPTransportFailure({ operation: 'start', ...describeDiagnosticError(e) })
-      throw new Error(formatConnectionError(e, this.agentDef))
+      throw startupError(e, this.agentDef)
     }
+
     const { child, input, output } = process
     const stream = ndJsonStream(input, output)
     let onUpdate: ACPSession['onUpdate'] = null

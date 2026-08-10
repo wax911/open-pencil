@@ -190,12 +190,21 @@ export type AIProviderID =
   | 'harness:pi'
   | `acp:${ACPAgentID}`
 
+export type ModelReasoningOption =
+  | { type: 'toggle' }
+  | { type: 'effort'; values: readonly string[] }
+  | { type: 'budget_tokens'; min?: number }
+
 export interface ModelOption {
   id: string
   name: string
   tag?: string
   capabilities?: readonly ('tools' | 'vision')[]
   recommendedMaxOutputTokens?: number
+  /** Whether the model supports reasoning/thinking. */
+  reasoning?: boolean
+  /** Declared reasoning controls for the model (from models.dev). */
+  reasoningOptions?: readonly ModelReasoningOption[]
 }
 
 export interface AIProviderDef {

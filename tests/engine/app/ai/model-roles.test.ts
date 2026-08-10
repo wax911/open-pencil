@@ -47,7 +47,8 @@ function settingsFixture(): AIModelSettings {
         modelID: 'claude-sonnet-4-6-20260301',
         customModelID: '',
         maxOutputTokens: 16_384,
-        capabilities: ['tools', 'vision']
+        capabilities: ['tools', 'vision'],
+        reasoningEffort: 'off'
       },
       {
         id: 'model-fast',
@@ -56,7 +57,8 @@ function settingsFixture(): AIModelSettings {
         modelID: 'gemini-3-flash-preview',
         customModelID: '',
         maxOutputTokens: 8192,
-        capabilities: ['tools']
+        capabilities: ['tools'],
+        reasoningEffort: 'off'
       }
     ],
     assignments: {
@@ -122,7 +124,8 @@ describe('AI model profiles and role assignments', () => {
       modelID: 'text-only',
       customModelID: '',
       maxOutputTokens: 4096,
-      capabilities: []
+      capabilities: [],
+      reasoningEffort: 'off'
     })
 
     setModelRoleAssignment('design', 'model-textonly')
@@ -187,7 +190,8 @@ describe('AI model profiles and role assignments', () => {
       modelID: '',
       customModelID: '',
       maxOutputTokens: 16_384,
-      capabilities: ['tools']
+      capabilities: ['tools'],
+      reasoningEffort: 'off'
     })
     replaceAIModelSettings(settings)
 

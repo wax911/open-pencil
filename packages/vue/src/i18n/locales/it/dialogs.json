@@ -388,5 +388,14 @@
   "diagnosticsClearDescription": "Questa operazione rimuove da questo dispositivo gli eventi diagnostici archiviati localmente.",
   "diagnosticsCleared": "Diagnostica cancellata.",
   "diagnosticsCopied": "Diagnostica copiata negli appunti.",
-  "diagnosticsCopyFailed": "Impossibile copiare la diagnostica negli appunti."
+  "diagnosticsCopyFailed": "Impossibile copiare la diagnostica negli appunti.",
+  "newConversation": "New conversation",
+  "noConversations": "No past conversations",
+  "deleteConversation": "Delete conversation",
+  "designDoc": "Design doc (DESIGN.md)",
+  "designDocDescription": "Attach a DESIGN.md brief so the AI retains your design direction and style.",
+  "loadDesignDoc": "Load from file",
+  "designDocLoadedFile": "Loaded {name}",
+  "clearDesignDoc": "Clear design doc",
+  "designDocContentPlaceholder": "Paste or edit your design brief here…"
 }

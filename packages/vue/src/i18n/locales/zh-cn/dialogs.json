@@ -388,5 +388,14 @@
   "diagnosticsClearDescription": "这会从此设备中删除本地保存的诊断事件。",
   "diagnosticsCleared": "诊断数据已清除。",
   "diagnosticsCopied": "诊断数据已复制到剪贴板。",
-  "diagnosticsCopyFailed": "无法将诊断数据复制到剪贴板。"
+  "diagnosticsCopyFailed": "无法将诊断数据复制到剪贴板。",
+  "newConversation": "New conversation",
+  "noConversations": "No past conversations",
+  "deleteConversation": "Delete conversation",
+  "designDoc": "Design doc (DESIGN.md)",
+  "designDocDescription": "Attach a DESIGN.md brief so the AI retains your design direction and style.",
+  "loadDesignDoc": "Load from file",
+  "designDocLoadedFile": "Loaded {name}",
+  "clearDesignDoc": "Clear design doc",
+  "designDocContentPlaceholder": "Paste or edit your design brief here…"
 }
