@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useFileDialog } from '@vueuse/core'
 import { TooltipProvider } from 'reka-ui'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import ChatProfileSelect from '@/components/chat/ChatProfileSelect.vue'
 import ProviderModelSelect from '@/components/chat/ProviderModelSelect.vue'
@@ -11,7 +11,11 @@ import { useButtonUI } from '@/components/ui/button'
 import { useAIChat } from '@/app/ai/chat/use'
 import { designModelConnection, designModelProfile, designModelProfiles } from '@/app/ai/models'
 import { resolveModelsDevModel } from '@/app/ai/models/catalog'
-import { defaultReasoningLevel, reasoningSelectorOptions } from '@/app/ai/reasoning'
+import {
+  defaultReasoningLevel,
+  fallbackReasoningOptions,
+  reasoningSelectorOptions
+} from '@/app/ai/reasoning'
 import {
   createImagePreviewURL,
   revokeImagePreviewURL,
@@ -40,6 +44,7 @@ const emit = defineEmits<{
 }>()
 
 const input = ref('')
+const inputRef = ref<HTMLTextAreaElement | null>(null)
 const images = ref<ImageAttachmentDraft[]>([])
 const { open: openImageDialog, reset: resetImageDialog, onChange: onImageChange } = useFileDialog({
   accept: 'image/png,image/jpeg,image/webp',
@@ -89,6 +94,16 @@ onImageChange((files) => {
 })
 onBeforeUnmount(clearImages)
 
+function autoResizeTextarea(): void {
+  const element = inputRef.value
+  if (!element) return
+  element.style.height = 'auto'
+  element.style.height = `${Math.min(element.scrollHeight, 160)}px`
+}
+
+onMounted(autoResizeTextarea)
+watch(input, autoResizeTextarea)
+
 const reasoningOptions = ref<readonly ModelReasoningOption[] | undefined>(undefined)
 const reasoningSelector = computed(() => reasoningSelectorOptions(reasoningOptions.value))
 const canSelectReasoning = computed(
@@ -117,7 +132,8 @@ async function refreshReasoningOptions(): Promise<void> {
   }
   const modelID = profile.customModelID.trim() || profile.modelID
   const catalogModel = await resolveModelsDevModel(connection.providerID, modelID)
-  reasoningOptions.value = catalogModel?.reasoningOptions
+  reasoningOptions.value =
+    catalogModel?.reasoningOptions ?? fallbackReasoningOptions(connection.providerID)
 }
 
 watch(
@@ -289,13 +305,14 @@ function handleInputKeydown(event: KeyboardEvent): void {
             <icon-lucide-image-plus class="size-4" />
           </button>
           <textarea
+            ref="inputRef"
             v-model="input"
             data-test-id="chat-input"
             :placeholder="dialogs.describeChange"
             :disabled="isStreaming"
             rows="2"
             aria-label="Describe a change"
-            class="block min-h-12 min-w-0 flex-1 resize-none bg-transparent px-2 pt-1.5 text-xs leading-relaxed text-surface outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
+            class="block max-h-40 min-h-12 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-xs leading-relaxed text-surface outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
             @keydown="handleInputKeydown"
             @copy.stop
             @cut.stop

@@ -34,6 +34,7 @@ import { buildSystemPrompt } from '@/app/ai/chat/system-prompt'
 import { createAIModelRuntime, resolveModelConnectionAPIKey } from '@/app/ai/models'
 import { resolveModelsDevModel } from '@/app/ai/models/catalog'
 import {
+  fallbackReasoningOptions,
   mergeProviderOptions,
   reasoningProviderOptions,
   reasoningSelectorOptions
@@ -285,8 +286,10 @@ export function createChatSessionManager({
       customModelID: profile.customModelID
     })
     const catalogModel = await resolveModelsDevModel(connection.providerID, effectiveModelID)
+    const reasoningOptions =
+      catalogModel?.reasoningOptions ?? fallbackReasoningOptions(connection.providerID)
     const override = reasoningOverride.value
-    const supportedLevels = reasoningSelectorOptions(catalogModel?.reasoningOptions)
+    const supportedLevels = reasoningSelectorOptions(reasoningOptions)
     const effectiveEffort =
       override && supportedLevels.some((option) => option.value === override)
         ? override
@@ -297,7 +300,7 @@ export function createChatSessionManager({
       model: runtime.model,
       effectiveModelID,
       maxOutputTokens: profile.maxOutputTokens,
-      reasoningOptions: catalogModel?.reasoningOptions,
+      reasoningOptions,
       reasoningEffort: effectiveEffort,
       systemPrompt: buildSystemPrompt()
     })

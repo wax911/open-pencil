@@ -7,7 +7,11 @@ import { ACP_AGENTS, AI_PROVIDERS, type AIProviderID } from '@open-pencil/core/c
 
 import { refreshAIProviderStatus } from '@/app/ai/chat/storage'
 import { resolveModelsDevModel } from '@/app/ai/models/catalog'
-import { defaultReasoningLevel, reasoningSelectorOptions } from '@/app/ai/reasoning'
+import {
+  defaultReasoningLevel,
+  fallbackReasoningOptions,
+  reasoningSelectorOptions
+} from '@/app/ai/reasoning'
 import {
   testProviderConnection,
   type ProviderConnectionTestFailureReason
@@ -92,7 +96,9 @@ const outputTokenRecommendation = computed(
   () => knownModel.value?.recommendedMaxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
 )
 const reasoningSelector = computed(() =>
-  reasoningSelectorOptions(catalogModel.value?.reasoningOptions)
+  reasoningSelectorOptions(
+    catalogModel.value?.reasoningOptions ?? fallbackReasoningOptions(draft.providerID)
+  )
 )
 const canConfigureReasoning = computed(() => !isACP.value && reasoningSelector.value.length > 0)
 const reasoningEffortModel = computed({

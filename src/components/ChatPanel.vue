@@ -283,14 +283,11 @@ function handleClearChat(): void {
 
 <template>
   <div data-test-id="chat-panel" class="flex min-w-0 flex-1 flex-col overflow-hidden select-text">
-    <ProviderSetup v-if="!isConfigured" />
-
-    <template v-else>
-      <!-- Conversation header -->
-      <div
-        class="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5"
-        data-test-id="chat-conversation-header"
-      >
+    <!-- Conversation header (always visible so history stays accessible) -->
+    <div
+      class="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5"
+      data-test-id="chat-conversation-header"
+    >
         <DropdownMenuRoot>
           <DropdownMenuTrigger as-child>
             <button
@@ -355,7 +352,10 @@ function handleClearChat(): void {
         </div>
       </div>
 
-      <ScrollAreaRoot class="min-h-0 flex-1">
+      <ProviderSetup v-if="!isConfigured" />
+
+      <template v-else>
+        <ScrollAreaRoot class="min-h-0 flex-1">
         <ScrollAreaViewport class="h-full px-3 py-3 [&>div]:h-full">
           <AppPlaceholder
             v-if="messages.length === 0"

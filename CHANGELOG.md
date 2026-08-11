@@ -44,6 +44,7 @@
 - Make local unsaved-work recovery configurable and remove retained recovery snapshots when recovery is disabled. (#574)
 - Add isolated visual inspection that sends bounded selection renders to the configured Vision model and returns text findings without retaining image data in Design chat history. (#232, #471)
 - Add image attachments to AI chat with bounded analysis, immediate transcript thumbnails, hover previews, and click-to-view images. (#232)
+- Keep the code panel from crashing module evaluation when Prism is bundled, so the app boots reliably in production builds.
 
 ### Changed
 

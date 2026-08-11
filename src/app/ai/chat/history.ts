@@ -81,11 +81,18 @@ export function documentKeyForStore(store: ChatDocumentKeySource): string {
 }
 
 export function loadChatHistory(): ChatHistory {
-  const parsed = parseHistory(chatHistoryStorage.value)
-  if (parsed) return parsed
+  const stored = chatHistoryStorage.value
+  const parsed = parseHistory(stored)
+  if (parsed) {
+    // Rehydrate through the ref so callers mutate the reactive proxy and the
+    // deep watcher persists changes. Mutating the raw object would bypass the
+    // proxy and silently drop the history.
+    if (stored !== parsed) chatHistoryStorage.value = parsed
+    return chatHistoryStorage.value ?? parsed
+  }
   const fresh: ChatHistory = { version: 1, activeByDocument: {}, conversations: {} }
   chatHistoryStorage.value = fresh
-  return fresh
+  return chatHistoryStorage.value
 }
 
 export function activeConversationId(history: ChatHistory, documentKey: string): string | null {

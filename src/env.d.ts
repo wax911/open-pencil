@@ -12,3 +12,6 @@ declare module '*.vue' {
   const component: DefineComponent<object, object, unknown>
   export default component
 }
+
+// prismjs component files are side-effect UMD modules loaded via dynamic import.
+declare module 'prismjs/components/prism-jsx'
